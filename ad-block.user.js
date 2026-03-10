@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      2026.02.18.4
 // @description  Instantly skip ads in browser games (taming.io, CrazyGames, Poki, etc.) and get rewards without watching. Multi-SDK support: CrazygamesAds, AdInPlay, Poki, GameDistribution, CPMStar. No tracking, fully open source.
-// @author       Claude
+// @author       Baiyan
 // @match        *://*/*
 // @grant        none
 // @run-at       document-start
