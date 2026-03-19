@@ -7,8 +7,9 @@
 // @match        https://swordmasters.io/*
 // @grant        none
 // @icon         https://www3.minijuegosgratis.com/v3/games/thumbnails/248539_7_sq.jpg
-// @downloadURL  
-// @updateURL    
+// @homepageURL  https://github.com/Baiyanscript/user.js/blob/main/SMST
+// @downloadURL  https://github.com/Baiyanscript/user.js/raw/refs/heads/main/SMST
+// @updateURL    https://github.com/Baiyanscript/user.js/raw/refs/heads/main/SMST
 // ==/UserScript==
 
 (function() {
