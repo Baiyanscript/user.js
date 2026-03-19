@@ -1,15 +1,15 @@
 // ==UserScript==
 // @name         SwordMasters.io 殺人倍數 - 假包 + 反偵測版
 // @namespace    http://tampermonkey.net/
-// @version      1.4-fake+antidetect
+// @version      1.0
 // @description  核心倍數 + 隨機延遲 + 假包混淆 + 簡單反偵測（封包率監控 + 疲勞暫停）
-// @author       Modified
+// @author       Baiyan
 // @match        https://swordmasters.io/*
 // @grant        none
 // @icon         https://www3.minijuegosgratis.com/v3/games/thumbnails/248539_7_sq.jpg
-// @homepageURL  https://github.com/Baiyanscript/user.js/blob/main/SMST
-// @downloadURL  https://github.com/Baiyanscript/user.js/raw/refs/heads/main/SMST
-// @updateURL    https://github.com/Baiyanscript/user.js/raw/refs/heads/main/SMST
+// @homepageURL  https://github.com/Baiyanscript/user.js/blob/main/SMST.user.js
+// @downloadURL  https://github.com/Baiyanscript/user.js/raw/refs/heads/main/SMST.user.js
+// @updateURL    https://github.com/Baiyanscript/user.js/raw/refs/heads/main/SMST.user.js
 // ==/UserScript==
 
 (function() {
