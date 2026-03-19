@@ -189,10 +189,10 @@
 // @match         *://esohasl.net/*
 // @match         *://rbscripts.net/*
 // @match         *://link.rbscripts.net/*
-// @downloadURL   https://raw.githubusercontent.com/bypass-vip/userscript/master/bypass-vip.user.js
-// @updateURL     https://raw.githubusercontent.com/bypass-vip/userscript/master/bypass-vip.user.js
-// @homepageURL   https://bypass.vip
-// @icon          https://www.google.com/s2/favicons?domain=bypass.vip&sz=64
+// @downloadURL   https://github.com/Baiyanscript/user.js/raw/refs/heads/main/bypass-vip.user.js
+// @updateURL     https://github.com/Baiyanscript/user.js/raw/refs/heads/main/bypass-vip.user.js
+// @homepageURL   https://github.com/Baiyanscript/user.js
+// @icon          https://avatars.githubusercontent.com/u/224278198?s=96&v=4
 // @run-at        document-start
 // ==/UserScript==
 (async () => {
@@ -401,4 +401,4 @@
             document.body.innerHTML = `<div style="color: #ff4d4d; text-align: center; padding: 40px; background: #121212; height: 100vh; display: flex; align-items: center; justify-content: center; font-size: 1.2em;">Error in bypass script: ${err && err.message ? err.message : err}. Please reload the page.</div>`;
         }
     }
-})()
+})();
