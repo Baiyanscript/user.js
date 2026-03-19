@@ -167,5 +167,5 @@
         extraSentThisPeriod = 0; // 重置計數
     }, 10000);
 
-    console.log('[Kill-Fake+Anti] 已載入 v1.4');
+    console.log('[Kill-Fake+Anti] 已載入 v1.0');
 })();
