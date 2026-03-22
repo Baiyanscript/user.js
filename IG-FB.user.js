@@ -4,6 +4,8 @@
 // @version      1.0
 // @description  強制取消靜音 + 音量滑桿
 // @author       Baiyan
+// @downloadURL  https://github.com/Baiyanscript/user.js/raw/refs/heads/main/IG-FB.user.js
+// @updateURL    https://github.com/Baiyanscript/user.js/raw/refs/heads/main/IG-FB.user.js
 // @icon         https://raw.githubusercontent.com/Baiyanscript/main/refs/heads/main/icon/IG-FB.png
 // @homepage     https://github.com/Baiyanscript/user.js
 // @supportURL   https://github.com/Baiyanscript/user.js
