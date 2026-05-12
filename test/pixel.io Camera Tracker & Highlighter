@@ -1,0 +1,390 @@
+// ==UserScript==
+// @name         pixel.io Camera Tracker & Highlighter
+// @namespace    http://tampermonkey.net/
+// @version      1.0
+// @description  Highlights players, smooth camera tracking to player head or preset points with visual dots
+// @author       You
+// @match        *://pixel.io/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // ---------- CONFIG ----------
+    const CONFIG = {
+        // Highlighting
+        HIGHLIGHT_PLAYERS: true,
+        PLAYER_HIGHLIGHT_COLOR: 'rgba(255, 0, 0, 0.6)',
+        PLAYER_OUTLINE_COLOR: '#ff0000',
+
+        // Camera smoothing
+        SMOOTHING_FACTOR: 0.1, // 0 = no move, 1 = instant
+
+        // Preset points (add your own here)
+        PRESET_POINTS: [
+            { name: "Center", x: 0, y: 0, enabled: true },
+            { name: "Spawn Area", x: 200, y: 300, enabled: true },
+            { name: "High Ground", x: -150, y: -200, enabled: true }
+        ],
+
+        // Visual dots
+        SHOW_DOTS: true,
+        DOT_COLOR: '#00ff00',
+        DOT_SIZE: 8,
+        DOT_OUTLINE: '#ffffff',
+
+        // Debug
+        DEBUG_MODE: true
+    };
+
+    // ---------- GLOBALS ----------
+    let currentTarget = null; // { type: 'player', entity: playerObject } or { type: 'preset', point: presetPoint }
+    let cameraX = 0, cameraY = 0;
+    let lastTimestamp = 0;
+
+    // ---------- HOOK INTO PIXEL.IO GLOBALS ----------
+    // (Assumes pixel.io exposes its game instance on window)
+    function getGameInstance() {
+        // Try common global names
+        if (window.game) return window.game;
+        if (window.pixelio) return window.pixelio;
+        if (window.PixelIO) return window.PixelIO;
+        if (window._game) return window._game;
+        return null;
+    }
+
+    function getPlayers() {
+        const game = getGameInstance();
+        if (!game) return [];
+        // Try different possible player container paths
+        if (game.players && typeof game.players === 'object') return Object.values(game.players);
+        if (game.playerList) return game.playerList;
+        if (game.entities && game.entities.filter) return game.entities.filter(e => e.type === 'player');
+        return [];
+    }
+
+    function getLocalPlayer() {
+        const game = getGameInstance();
+        if (!game) return null;
+        if (game.localPlayer) return game.localPlayer;
+        if (game.player) return game.player;
+        return null;
+    }
+
+    // ---------- CAMERA CONTROL (Overriding) ----------
+    function setCameraPosition(x, y) {
+        const game = getGameInstance();
+        if (!game) return;
+
+        // Try to find camera object
+        let camera = game.camera || game._camera || (game.renderer && game.renderer.camera);
+        if (camera) {
+            if (typeof camera.setPosition === 'function') {
+                camera.setPosition(x, y);
+            } else if (camera.x !== undefined) {
+                camera.x = x;
+                camera.y = y;
+            }
+        }
+
+        // Alternative: override the game's follow target
+        if (game.followTarget) {
+            game.followTarget = { x, y };
+        }
+
+        cameraX = x;
+        cameraY = y;
+    }
+
+    function getCurrentCameraPosition() {
+        const game = getGameInstance();
+        if (!game) return { x: 0, y: 0 };
+        let camera = game.camera || game._camera || (game.renderer && game.renderer.camera);
+        if (camera) {
+            return { x: camera.x || 0, y: camera.y || 0 };
+        }
+        return { x: cameraX, y: cameraY };
+    }
+
+    // Smoothly update camera
+    function updateCameraSmooth(targetX, targetY) {
+        let current = getCurrentCameraPosition();
+        let newX = current.x + (targetX - current.x) * CONFIG.SMOOTHING_FACTOR;
+        let newY = current.y + (targetY - current.y) * CONFIG.SMOOTHING_FACTOR;
+        setCameraPosition(newX, newY);
+    }
+
+    // ---------- TRACKING TARGETS ----------
+    function getTargetPosition() {
+        if (!currentTarget) return null;
+
+        if (currentTarget.type === 'player' && currentTarget.entity) {
+            let p = currentTarget.entity;
+            // Try to get head position (if entity has head offset)
+            let baseX = p.x || p.position?.x || 0;
+            let baseY = p.y || p.position?.y || 0;
+            let headOffsetY = -15; // typical head offset above center
+            if (p.height) headOffsetY = -p.height / 2;
+            return { x: baseX, y: baseY + headOffsetY };
+        }
+
+        if (currentTarget.type === 'preset' && currentTarget.point) {
+            return { x: currentTarget.point.x, y: currentTarget.point.y };
+        }
+
+        return null;
+    }
+
+    // ---------- VISUAL DOTS (Canvas Overlay) ----------
+    let overlayCanvas = null;
+    let overlayCtx = null;
+
+    function createOverlay() {
+        if (overlayCanvas) return;
+        overlayCanvas = document.createElement('canvas');
+        overlayCanvas.style.position = 'fixed';
+        overlayCanvas.style.top = '0';
+        overlayCanvas.style.left = '0';
+        overlayCanvas.style.width = '100%';
+        overlayCanvas.style.height = '100%';
+        overlayCanvas.style.pointerEvents = 'none';
+        overlayCanvas.style.zIndex = '9999';
+        document.body.appendChild(overlayCanvas);
+
+        function resize() {
+            overlayCanvas.width = window.innerWidth;
+            overlayCanvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+        overlayCtx = overlayCanvas.getContext('2d');
+    }
+
+    function worldToScreen(worldX, worldY) {
+        // This requires access to the game's projection matrix or camera offset + zoom
+        const game = getGameInstance();
+        if (!game) return null;
+
+        let camera = game.camera || game._camera || (game.renderer && game.renderer.camera);
+        let zoom = 1;
+        if (camera && camera.zoom) zoom = camera.zoom;
+        if (camera && typeof camera.getZoom === 'function') zoom = camera.getZoom();
+
+        let screenCenterX = window.innerWidth / 2;
+        let screenCenterY = window.innerHeight / 2;
+
+        let camX = camera ? (camera.x || 0) : cameraX;
+        let camY = camera ? (camera.y || 0) : cameraY;
+
+        let screenX = screenCenterX + (worldX - camX) * zoom;
+        let screenY = screenCenterY + (worldY - camY) * zoom;
+
+        return { x: screenX, y: screenY };
+    }
+
+    function drawDots() {
+        if (!CONFIG.SHOW_DOTS) return;
+        if (!overlayCtx) createOverlay();
+        overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+        // Draw preset points
+        for (let point of CONFIG.PRESET_POINTS) {
+            if (!point.enabled) continue;
+            let screenPos = worldToScreen(point.x, point.y);
+            if (screenPos && screenPos.x > 0 && screenPos.x < overlayCanvas.width && screenPos.y > 0 && screenPos.y < overlayCanvas.height) {
+                overlayCtx.beginPath();
+                overlayCtx.arc(screenPos.x, screenPos.y, CONFIG.DOT_SIZE, 0, Math.PI * 2);
+                overlayCtx.fillStyle = CONFIG.DOT_COLOR;
+                overlayCtx.fill();
+                overlayCtx.strokeStyle = CONFIG.DOT_OUTLINE;
+                overlayCtx.lineWidth = 2;
+                overlayCtx.stroke();
+                overlayCtx.fillStyle = '#ffffff';
+                overlayCtx.font = '12px Arial';
+                overlayCtx.shadowBlur = 0;
+                overlayCtx.fillText(point.name, screenPos.x + 10, screenPos.y - 5);
+            }
+        }
+
+        // Draw player heads
+        if (CONFIG.HIGHLIGHT_PLAYERS) {
+            let players = getPlayers();
+            for (let p of players) {
+                let headX = (p.x || p.position?.x || 0);
+                let headY = (p.y || p.position?.y || 0) - 15;
+                let screenPos = worldToScreen(headX, headY);
+                if (screenPos && screenPos.x > 0 && screenPos.x < overlayCanvas.width && screenPos.y > 0 && screenPos.y < overlayCanvas.height) {
+                    overlayCtx.beginPath();
+                    overlayCtx.arc(screenPos.x, screenPos.y, 5, 0, Math.PI * 2);
+                    overlayCtx.fillStyle = CONFIG.PLAYER_HIGHLIGHT_COLOR;
+                    overlayCtx.fill();
+                    overlayCtx.strokeStyle = CONFIG.PLAYER_OUTLINE_COLOR;
+                    overlayCtx.stroke();
+                }
+            }
+        }
+
+        // Draw current target dot (extra large)
+        let targetPos = getTargetPosition();
+        if (targetPos) {
+            let screenPos = worldToScreen(targetPos.x, targetPos.y);
+            if (screenPos) {
+                overlayCtx.beginPath();
+                overlayCtx.arc(screenPos.x, screenPos.y, CONFIG.DOT_SIZE + 4, 0, Math.PI * 2);
+                overlayCtx.fillStyle = '#ffff00';
+                overlayCtx.fill();
+                overlayCtx.strokeStyle = '#ffaa00';
+                overlayCtx.lineWidth = 3;
+                overlayCtx.stroke();
+            }
+        }
+    }
+
+    // ---------- PLAYER HIGHLIGHT VIA ENTITY MODIFICATION (if possible) ----------
+    function applyPlayerHighlights() {
+        if (!CONFIG.HIGHLIGHT_PLAYERS) return;
+        let players = getPlayers();
+        for (let p of players) {
+            if (p.setHighlight) {
+                p.setHighlight(true, CONFIG.PLAYER_HIGHLIGHT_COLOR);
+            } else if (p.highlight !== undefined) {
+                p.highlight = CONFIG.PLAYER_HIGHLIGHT_COLOR;
+            }
+            // Try to force outline or material color
+            if (p.material) p.material.color.setHex(0xff0000);
+            if (p.sprite) p.sprite.tint = 0xff0000;
+        }
+    }
+
+    // ---------- UI: Control Panel ----------
+    function createControlPanel() {
+        let panel = document.createElement('div');
+        panel.style.position = 'fixed';
+        panel.style.bottom = '10px';
+        panel.style.right = '10px';
+        panel.style.backgroundColor = 'rgba(0,0,0,0.7)';
+        panel.style.color = 'white';
+        panel.style.padding = '10px';
+        panel.style.zIndex = '10000';
+        panel.style.fontFamily = 'monospace';
+        panel.style.fontSize = '12px';
+        panel.style.borderRadius = '5px';
+
+        panel.innerHTML = `
+            <b>Camera Tracker</b><br>
+            <button id="track-nearest">Track Nearest Player</button><br>
+            <button id="track-preset-cycle">Cycle Preset Points</button><br>
+            <button id="stop-tracking">Stop Tracking</button><br>
+            <div id="tracking-status">Not tracking</div>
+            <hr>
+            <label><input type="checkbox" id="toggle-dots" ${CONFIG.SHOW_DOTS ? 'checked' : ''}> Show Dots</label><br>
+            <label><input type="checkbox" id="toggle-highlight" ${CONFIG.HIGHLIGHT_PLAYERS ? 'checked' : ''}> Highlight Players</label>
+        `;
+        document.body.appendChild(panel);
+
+        let trackNearest = () => {
+            let players = getPlayers();
+            let local = getLocalPlayer();
+            let nearest = null;
+            let nearestDist = Infinity;
+            for (let p of players) {
+                if (local && p === local) continue;
+                let dx = (p.x || 0) - (local.x || 0);
+                let dy = (p.y || 0) - (local.y || 0);
+                let dist = Math.hypot(dx, dy);
+                if (dist < nearestDist) {
+                    nearestDist = dist;
+                    nearest = p;
+                }
+            }
+            if (nearest) {
+                currentTarget = { type: 'player', entity: nearest };
+                document.getElementById('tracking-status').innerText = `Tracking: Player (dist ${Math.round(nearestDist)})`;
+                if (CONFIG.DEBUG_MODE) console.log('[Tracker] Now tracking nearest player', nearest);
+            } else {
+                document.getElementById('tracking-status').innerText = 'No other players found';
+            }
+        };
+
+        let presetIndex = 0;
+        let cyclePreset = () => {
+            let enabledPoints = CONFIG.PRESET_POINTS.filter(p => p.enabled);
+            if (enabledPoints.length === 0) {
+                document.getElementById('tracking-status').innerText = 'No enabled preset points';
+                return;
+            }
+            let point = enabledPoints[presetIndex % enabledPoints.length];
+            presetIndex++;
+            currentTarget = { type: 'preset', point: point };
+            document.getElementById('tracking-status').innerText = `Tracking Preset: ${point.name}`;
+            if (CONFIG.DEBUG_MODE) console.log('[Tracker] Tracking preset point', point);
+        };
+
+        let stopTracking = () => {
+            currentTarget = null;
+            document.getElementById('tracking-status').innerText = 'Not tracking';
+            if (CONFIG.DEBUG_MODE) console.log('[Tracker] Stopped tracking');
+        };
+
+        document.getElementById('track-nearest').addEventListener('click', trackNearest);
+        document.getElementById('track-preset-cycle').addEventListener('click', cyclePreset);
+        document.getElementById('stop-tracking').addEventListener('click', stopTracking);
+
+        let toggleDots = (e) => {
+            CONFIG.SHOW_DOTS = e.target.checked;
+            if (!CONFIG.SHOW_DOTS && overlayCtx) overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+        };
+        let toggleHighlight = (e) => {
+            CONFIG.HIGHLIGHT_PLAYERS = e.target.checked;
+        };
+
+        document.getElementById('toggle-dots').addEventListener('change', toggleDots);
+        document.getElementById('toggle-highlight').addEventListener('change', toggleHighlight);
+    }
+
+    // ---------- MAIN LOOP ----------
+    function update() {
+        // Update camera target
+        if (currentTarget) {
+            let targetPos = getTargetPosition();
+            if (targetPos) {
+                updateCameraSmooth(targetPos.x, targetPos.y);
+            } else {
+                // Target lost? maybe player died
+                if (currentTarget.type === 'player') {
+                    currentTarget = null;
+                    document.getElementById('tracking-status').innerText = 'Player lost, tracking stopped';
+                }
+            }
+        }
+
+        // Apply visual enhancements
+        applyPlayerHighlights();
+        if (CONFIG.SHOW_DOTS) drawDots();
+
+        requestAnimationFrame(update);
+    }
+
+    // ---------- INITIALIZATION ----------
+    function waitForGame() {
+        let checkInterval = setInterval(() => {
+            let game = getGameInstance();
+            if (game && (game.camera || game._camera || (game.renderer && game.renderer.camera))) {
+                clearInterval(checkInterval);
+                console.log('[pixel.io Helper] Game detected, starting script');
+                createControlPanel();
+                createOverlay();
+                update();
+            } else if (document.readyState === 'complete' && !game) {
+                // If page loaded but no game object, might be different structure - still try to run UI
+                console.warn('[pixel.io Helper] Game object not found, but UI will still attempt to work');
+                createControlPanel();
+                createOverlay();
+                update();
+            }
+        }, 1000);
+    }
+
+    waitForGame();
+})();
