@@ -1,0 +1,285 @@
+// ==UserScript==
+// @name         Poxel.io Cinematic Camera Helper
+// @namespace    http://tampermonkey.net/
+// @version      1.0
+// @description  Demo/editor camera helper with smooth camera tracking overlay
+// @author       ChatGPT
+// @match        *://poxel.io/*
+// @grant        none
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    // =========================================
+    // SETTINGS
+    // =========================================
+
+    const settings = {
+        showESP: true,
+        showLines: true,
+        smoothFactor: 0.08,
+
+        // Demo camera target mode
+        usePresetPoint: false,
+
+        // Preset screen position
+        presetPoint: {
+            x: window.innerWidth / 2,
+            y: window.innerHeight / 3
+        }
+    };
+
+    // =========================================
+    // OVERLAY
+    // =========================================
+
+    const overlay = document.createElement('canvas');
+
+    overlay.width = window.innerWidth;
+    overlay.height = window.innerHeight;
+
+    overlay.style.position = 'fixed';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.pointerEvents = 'none';
+    overlay.style.zIndex = '999999';
+
+    document.body.appendChild(overlay);
+
+    const ctx = overlay.getContext('2d');
+
+    window.addEventListener('resize', () => {
+        overlay.width = window.innerWidth;
+        overlay.height = window.innerHeight;
+    });
+
+    // =========================================
+    // DEMO PLAYER DATA
+    // Replace with real entity positions if needed
+    // =========================================
+
+    let players = [];
+
+    function generatePlayers() {
+        players = [];
+
+        for (let i = 0; i < 10; i++) {
+            players.push({
+                x: Math.random() * window.innerWidth,
+                y: Math.random() * window.innerHeight,
+                w: 40,
+                h: 80,
+                name: `Player_${i}`
+            });
+        }
+    }
+
+    generatePlayers();
+
+    setInterval(generatePlayers, 2500);
+
+    // =========================================
+    // CAMERA TRACKING
+    // =========================================
+
+    let camX = window.innerWidth / 2;
+    let camY = window.innerHeight / 2;
+
+    function lerp(start, end, factor) {
+        return start + (end - start) * factor;
+    }
+
+    function getClosestPlayer() {
+
+        let best = null;
+        let bestDist = Infinity;
+
+        players.forEach(player => {
+
+            const px = player.x + player.w / 2;
+            const py = player.y;
+
+            const dx = px - window.innerWidth / 2;
+            const dy = py - window.innerHeight / 2;
+
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = player;
+            }
+        });
+
+        return best;
+    }
+
+    function updateCamera() {
+
+        let targetX;
+        let targetY;
+
+        if (settings.usePresetPoint) {
+
+            targetX = settings.presetPoint.x;
+            targetY = settings.presetPoint.y;
+
+        } else {
+
+            const target = getClosestPlayer();
+
+            if (!target) return;
+
+            // Head position
+            targetX = target.x + target.w / 2;
+            targetY = target.y;
+        }
+
+        camX = lerp(camX, targetX, settings.smoothFactor);
+        camY = lerp(camY, targetY, settings.smoothFactor);
+    }
+
+    // =========================================
+    // DRAW
+    // =========================================
+
+    function drawESP() {
+
+        if (!settings.showESP) return;
+
+        players.forEach(player => {
+
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = '#ff0000';
+
+            ctx.strokeRect(
+                player.x,
+                player.y,
+                player.w,
+                player.h
+            );
+
+            ctx.font = '14px Arial';
+            ctx.fillStyle = '#ffffff';
+
+            ctx.fillText(
+                player.name,
+                player.x,
+                player.y - 8
+            );
+
+            if (settings.showLines) {
+
+                ctx.beginPath();
+
+                ctx.moveTo(
+                    window.innerWidth / 2,
+                    window.innerHeight
+                );
+
+                ctx.lineTo(
+                    player.x + player.w / 2,
+                    player.y + player.h / 2
+                );
+
+                ctx.strokeStyle = '#00ff00';
+                ctx.stroke();
+            }
+        });
+    }
+
+    function drawCameraPoint() {
+
+        ctx.beginPath();
+
+        ctx.arc(camX, camY, 8, 0, Math.PI * 2);
+
+        ctx.fillStyle = '#00ffff';
+        ctx.fill();
+
+        ctx.font = '14px Arial';
+        ctx.fillStyle = '#ffffff';
+
+        ctx.fillText(
+            'Camera Target',
+            camX + 12,
+            camY + 4
+        );
+    }
+
+    function drawPresetPoint() {
+
+        if (!settings.usePresetPoint) return;
+
+        ctx.beginPath();
+
+        ctx.arc(
+            settings.presetPoint.x,
+            settings.presetPoint.y,
+            6,
+            0,
+            Math.PI * 2
+        );
+
+        ctx.fillStyle = '#ffff00';
+        ctx.fill();
+
+        ctx.fillText(
+            'Preset Point',
+            settings.presetPoint.x + 10,
+            settings.presetPoint.y
+        );
+    }
+
+    // =========================================
+    // UI CHECKBOX
+    // =========================================
+
+    const ui = document.createElement('div');
+
+    ui.style.position = 'fixed';
+    ui.style.top = '20px';
+    ui.style.right = '20px';
+    ui.style.background = 'rgba(0,0,0,0.7)';
+    ui.style.padding = '10px';
+    ui.style.color = 'white';
+    ui.style.fontFamily = 'Arial';
+    ui.style.zIndex = '9999999';
+
+    ui.innerHTML = `
+        <label>
+            <input type="checkbox" id="presetToggle">
+            Use Preset Camera Point
+        </label>
+    `;
+
+    document.body.appendChild(ui);
+
+    document
+        .getElementById('presetToggle')
+        .addEventListener('change', (e) => {
+
+            settings.usePresetPoint = e.target.checked;
+        });
+
+    // =========================================
+    // RENDER LOOP
+    // =========================================
+
+    function render() {
+
+        ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+        updateCamera();
+
+        drawESP();
+        drawPresetPoint();
+        drawCameraPoint();
+
+        requestAnimationFrame(render);
+    }
+
+    render();
+
+    console.log('[Poxel.io Cinematic Camera Helper Loaded]');
+})();
