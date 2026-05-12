@@ -1,0 +1,337 @@
+// ==UserScript==
+// @name         Poxel.io - Demo Player Highlight + Smooth Camera + Target Dot
+// @namespace    demo.poxel.aimbot.visual
+// @version      0.1.0
+// @match        https://poxel.io/*
+// @grant        none
+// ==/UserScript==
+
+(() => {
+  'use strict';
+
+  /***********************
+   * User config
+   ***********************/
+  const CFG = {
+    enabled: true,
+
+    // Highlight players
+    highlightPlayers: true,
+    highlightColor: 'rgba(255, 80, 80, 0.95)',
+    highlightRadiusPx: 7,
+
+    // Camera target behavior
+    camera: {
+      enabled: true,
+      smoothFactor: 0.12, // 0..1; higher = faster
+      maxStep: 0.25,      // prevents wild jumps; tweak
+    },
+
+    // Visualization of the chosen target
+    targetDot: {
+      enabled: true,
+      radiusPx: 5,
+      color: 'rgba(80, 180, 255, 1)',
+      outline: 'rgba(0, 40, 120, 0.9)'
+    },
+
+    // Choose which target mode to use
+    targetMode: 'preset',
+    // 'preset' | 'nearestHead' | 'byIndex'
+
+    // If preset:
+    // Add your preset points here (world coordinates).
+    // You said: "preset point that could be a Player head, in the demo"
+    presets: [
+      // TODO: Replace with your real demo world coordinates
+      { name: 'Preset A (demo head)', enabled: true, world: { x: 0, y: 0, z: 0 } },
+
+      { name: 'Preset B (alt)', enabled: false, world: { x: 0, y: 0, z: 0 } },
+    ],
+
+    // If byIndex:
+    byIndex: {
+      enabled: false,
+      index: 0
+    },
+
+    // If nearestHead:
+    nearestHead: {
+      enabled: false,
+      // optional filter, e.g., closest to screen center
+      useScreenCenterBias: true
+    }
+  };
+
+  /***********************
+   * Internal state
+   ***********************/
+  const overlay = makeOverlay();
+  let activeDotEl = null;
+
+  /***********************
+   * Main loop
+   ***********************/
+  function tick() {
+    if (!CFG.enabled) return;
+
+    // 1) Acquire scene data (TODO: connect to poxel.io internals)
+    const api = getGameApi(); // provides players, camera, projection, etc.
+
+    // 2) Highlight players
+    if (CFG.highlightPlayers) {
+      tryHighlightPlayers(api);
+    }
+
+    // 3) Determine target world position
+    const target = getTargetWorld(api);
+
+    // 4) Visualize target (dot)
+    if (CFG.targetDot.enabled && target && target.screen) {
+      renderTargetDot(target.screen.x, target.screen.y);
+    } else {
+      clearTargetDot();
+    }
+
+    // 5) Smooth camera movement (toward target)
+    if (CFG.camera.enabled && target && target.world && api.camera && api.setCameraTarget) {
+      smoothCameraTo(api, target.world);
+    }
+
+    requestAnimationFrame(tick);
+  }
+
+  requestAnimationFrame(tick);
+
+  /***********************
+   * Overlay + visualization
+   ***********************/
+  function makeOverlay() {
+    // Use a fixed-position overlay for dot + highlight markers.
+    // Assumes the game canvas is full-page; if not, we adjust via canvas bounding rect.
+    const el = document.createElement('div');
+    el.style.position = 'fixed';
+    el.style.left = '0';
+    el.style.top = '0';
+    el.style.width = '100%';
+    el.style.height = '100%';
+    el.style.pointerEvents = 'none';
+    el.style.zIndex = '999999';
+    document.documentElement.appendChild(el);
+    return el;
+  }
+
+  function renderTargetDot(screenX, screenY) {
+    if (!activeDotEl) {
+      activeDotEl = document.createElement('div');
+      activeDotEl.style.position = 'absolute';
+      activeDotEl.style.width = '12px';
+      activeDotEl.style.height = '12px';
+      activeDotEl.style.borderRadius = '50%';
+      activeDotEl.style.background = CFG.targetDot.color;
+      activeDotEl.style.boxShadow = `0 0 0 2px ${CFG.targetDot.outline}, 0 0 12px rgba(80,180,255,0.7)`;
+      overlay.appendChild(activeDotEl);
+    }
+    activeDotEl.style.transform = `translate(${screenX - 6}px, ${screenY - 6}px)`;
+  }
+
+  function clearTargetDot() {
+    if (activeDotEl) activeDotEl.style.display = 'none';
+  }
+
+  function clearHighlights() {
+    // remove all highlight markers each frame
+    // (we recreate them for simplicity; optimize if needed)
+    overlay.querySelectorAll('[data-poxel-highlight="1"]').forEach(n => n.remove());
+  }
+
+  function renderHighlightAt(screenX, screenY) {
+    const el = document.createElement('div');
+    el.dataset.poxelHighlight = '1';
+    el.style.position = 'absolute';
+    el.style.width = `${CFG.highlightPlayers ? (CFG.highlightRadiusPx * 2) : 0}px`;
+    el.style.height = `${CFG.highlightPlayers ? (CFG.highlightRadiusPx * 2) : 0}px`;
+    el.style.borderRadius = '50%';
+    el.style.background = CFG.highlightColor;
+    el.style.boxShadow = '0 0 10px rgba(255,80,80,0.6), 0 0 0 2px rgba(255,255,255,0.15)';
+    el.style.transform = `translate(${screenX - CFG.highlightRadiusPx}px, ${screenY - CFG.highlightRadiusPx}px)`;
+    overlay.appendChild(el);
+  }
+
+  /***********************
+   * Target selection
+   ***********************/
+  function getTargetWorld(api) {
+    // Returns { world: {x,y,z}, screen: {x,y} } or null
+
+    let worldPos = null;
+
+    // preset mode
+    if (CFG.targetMode === 'preset') {
+      const p = CFG.presets.find(pp => pp.enabled);
+      if (p && p.world) worldPos = p.world;
+    }
+
+    // nearestHead mode
+    if (CFG.targetMode === 'nearestHead') {
+      const res = getNearestPlayerHeadWorld(api);
+      if (res) worldPos = res;
+    }
+
+    // byIndex mode
+    if (CFG.targetMode === 'byIndex' && CFG.byIndex.enabled) {
+      const pl = getPlayersArray(api);
+      const t = pl && pl[CFG.byIndex.index];
+      if (t) worldPos = getPlayerHeadWorld(api, t);
+    }
+
+    if (!worldPos || !api.projectWorldToScreen || !api.projectWorldToScreen(worldPos)) {
+      return worldPos ? { world: worldPos, screen: null } : null;
+    }
+
+    const screen = api.projectWorldToScreen(worldPos);
+    if (!screen) return null;
+
+    return { world: worldPos, screen };
+  }
+
+  function getNearestPlayerHeadWorld(api) {
+    const players = getPlayersArray(api);
+    if (!players || players.length === 0) return null;
+
+    let best = null;
+    let bestScore = Infinity;
+
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const center = { x: w * 0.5, y: h * 0.5 };
+
+    for (const p of players) {
+      const head = getPlayerHeadWorld(api, p);
+      if (!head) continue;
+
+      const s = api.projectWorldToScreen(head);
+      if (!s) continue;
+
+      let dx = s.x - center.x;
+      let dy = s.y - center.y;
+      const dist2 = dx * dx + dy * dy;
+
+      // score (you can add team filters, alive checks, etc.)
+      const score = dist2;
+      if (score < bestScore) {
+        bestScore = score;
+        best = head;
+      }
+    }
+    return best;
+  }
+
+  /***********************
+   * Highlight logic
+   ***********************/
+  function tryHighlightPlayers(api) {
+    clearHighlights();
+
+    const players = getPlayersArray(api);
+    if (!players) return;
+
+    for (const p of players) {
+      // head height bias can be adjusted here if your "head" is not exactly y+height
+      const headWorld = getPlayerHeadWorld(api, p);
+      if (!headWorld) continue;
+
+      const screen = api.projectWorldToScreen(headWorld);
+      if (!screen) continue;
+
+      renderHighlightAt(screen.x, screen.y);
+    }
+  }
+
+  /***********************
+   * Smooth camera move
+   ***********************/
+  function smoothCameraTo(api, targetWorld) {
+    // This is the part that is most engine-dependent.
+    // The ideal API provides:
+    //  - api.camera.position (vector)
+    //  - api.cameraTarget or method
+    //  - api.setCameraTarget(nextWorldOrLookAt)
+    //
+    // We'll implement generic "move camera toward target" with a step limit.
+
+    const camPos = api.camera && api.camera.position;
+    if (!camPos) return;
+
+    const to = sub3(targetWorld, camPos);
+    const dist = len3(to);
+    if (dist < 0.00001) return;
+
+    // normalized direction
+    const dir = scale3(to, 1 / dist);
+
+    // move step limited by maxStep, scaled by smoothFactor
+    const step = Math.min(CFG.camera.maxStep, dist * CFG.camera.smoothFactor);
+
+    const next = add3(camPos, scale3(dir, step));
+
+    // Now set camera position OR target.
+    // TODO: If poxel uses "camera.lookAt", you might want setCameraLookAt instead.
+    api.setCameraTarget(next, targetWorld);
+  }
+
+  /***********************
+   * Vector helpers
+   ***********************/
+  function add3(a, b) { return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }; }
+  function sub3(a, b) { return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }; }
+  function scale3(v, s) { return { x: v.x * s, y: v.y * s, z: v.z * s }; }
+  function len3(v) { return Math.hypot(v.x, v.y, v.z); }
+
+  /***********************
+   * Game API hook (TODO)
+   ***********************
+   * You MUST adapt the functions below to match poxel.io’s internal structures.
+   * Typical approach:
+   * - Find the main game object / scene
+   * - Get list of player meshes/objects
+   * - Use the same renderer camera + projection matrix
+   * - Return camera and projection methods
+   ************************/
+  function getGameApi() {
+    // If you already have something like `demo aimbot`, wire it here.
+    // Return nulls if not ready; script will simply do nothing.
+
+    const api = {
+      camera: null,
+      projectWorldToScreen: null,
+      setCameraTarget: null,
+    };
+
+    // TODO: Hook to actual scene/camera/projection
+    // Example pseudo:
+    // api.camera = window.__POXEL_CAMERA__;
+    // api.projectWorldToScreen = (world) => projectUsingThree(world, api.camera, rendererSize);
+    // api.setCameraTarget = (nextCamPos, lookAtWorld) => { api.camera.position.copy(nextCamPos); api.camera.lookAt(lookAtWorld); };
+
+    return api;
+  }
+
+  function getPlayersArray(api) {
+    // TODO: Return array of player objects from the game.
+    // Examples:
+    // - api.scene.children.filter(o => o.userData?.isPlayer)
+    // - gameState.players
+    // - etc.
+    return null;
+  }
+
+  function getPlayerHeadWorld(api, playerObj) {
+    // TODO: compute head world position.
+    // If playerObj is a mesh/object with world position:
+    //   return {x: playerObj.position.x, y: playerObj.position.y + headOffset, z: playerObj.position.z}
+    // If it has bones:
+    //   return bone.getWorldPosition()
+    return null;
+  }
+})();
