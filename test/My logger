@@ -1,0 +1,70 @@
+// ==UserScript==
+// @name        My logger
+// @namespace   Violentmonkey Scripts
+// @match       *://*/*
+// @icon
+// @grant       none
+// @version     1.0
+// @author      -
+// @description 3/22/2026, 3:14:04 PM
+// ==/UserScript==
+
+(function () {
+  const originalConsole = {};
+  const logs = [];
+
+  const methods = ["log", "info", "warn", "error", "debug"];
+
+  methods.forEach((method) => {
+    originalConsole[method] = console[method];
+
+    console[method] = function (...args) {
+      const entry = {
+        method,
+        timestamp: new Date().toISOString(),
+        args: args.map((arg) => {
+          try {
+            return typeof arg === "object"
+              ? JSON.parse(JSON.stringify(arg))
+              : arg;
+          } catch {
+            return String(arg);
+          }
+        }),
+      };
+
+      logs.push(entry);
+
+      originalConsole[method].apply(console, args);
+    };
+  });
+
+  const button = document.createElement("button");
+  button.textContent = "Download Console Logs";
+  button.style.position = "fixed";
+  button.style.bottom = "20px";
+  button.style.right = "20px";
+  button.style.zIndex = "9999";
+  button.style.padding = "10px 15px";
+  button.style.background = "#111";
+  button.style.color = "#fff";
+  button.style.border = "none";
+  button.style.cursor = "pointer";
+  button.style.borderRadius = "6px";
+
+  button.onclick = function () {
+    const blob = new Blob([JSON.stringify(logs, null, 2)], {
+      type: "application/json",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "message.txt";
+    a.click();
+
+    URL.revokeObjectURL(url);
+  };
+
+  document.body.appendChild(button);
+})();
