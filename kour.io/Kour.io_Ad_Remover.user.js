@@ -1,4 +1,5 @@
 // ==UserScript==
+// https://greasyfork.org/en/scripts/555464-kour-io-ad-remover
 // @name         Kour.io Ad Remover
 // @namespace    kour.ad.remover
 // @version      1.0
