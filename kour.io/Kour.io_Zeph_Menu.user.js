@@ -1,4 +1,5 @@
 // ==UserScript==
+// https://greasyfork.org/en/scripts/526361-kour-io-zeph-menu
 // @name         Kour.io Zeph Menu
 // @match        *://kour.io/*
 // @version      4.1
