@@ -1,4 +1,5 @@
 // ==UserScript==
+// https://greasyfork.org/zh-TW/scripts/576645-kour-io-ad-blocker-by-wolf
 // @name         Kour.io Ad blocker by wolf_
 // @namespace    kour.io.
 // @version      1.0
