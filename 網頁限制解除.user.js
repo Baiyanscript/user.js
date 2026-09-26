@@ -1,4 +1,5 @@
 // ==UserScript==
+// https://greasyfork.org/zh-TW/scripts/14146-%E7%BD%91%E9%A1%B5%E9%99%90%E5%88%B6%E8%A7%A3%E9%99%A4
 // @namespace         https://www.github.com/Cat7373/
 
 // @name              网页限制解除
